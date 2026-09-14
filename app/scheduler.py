@@ -49,6 +49,7 @@ class Scheduler:
                 self._backup_loop(),
                 self._reengagement_loop(),
                 self._frequency_drop_loop(),
+                self._retry_loop(),
             )
         except asyncio.CancelledError:
             pass
@@ -71,6 +72,20 @@ class Scheduler:
                 await self._poll_inflight_calls()
             except Exception:  # noqa: BLE001
                 logger.exception("poll loop error")
+            await asyncio.sleep(POLL_INTERVAL)
+
+    async def _retry_loop(self) -> None:
+        """Fires the single 5-minute no_answer/voicemail retry redial
+        (see `Pipeline.redial_due_calls`)."""
+        if not self.pipeline.calle.enabled:
+            return
+        while not self._stop.is_set():
+            try:
+                n = await self.pipeline.redial_due_calls()
+                if n:
+                    logger.info("Redialed %d retry-scheduled calls", n)
+            except Exception:  # noqa: BLE001
+                logger.exception("retry loop error")
             await asyncio.sleep(POLL_INTERVAL)
 
     async def _poll_inflight_calls(self) -> None:
@@ -99,6 +114,20 @@ class Scheduler:
                     await notify.send_admin("❌ Arama başarısız oldu (call_failed).")
                 continue
             if outcome in ("no_answer", "voicemail"):
+                if (call.get("retry_count") or 0) == 0:
+                    retry_at = (
+                        datetime.now(timezone.utc) + timedelta(minutes=5)
+                    ).isoformat(timespec="seconds")
+                    self.repo.update_call(
+                        call["id"], status="retry_scheduled", outcome=outcome,
+                        retry_count=1, retry_at=retry_at,
+                    )
+                    if call.get("notify_completion"):
+                        await notify.send_admin(
+                            f"ℹ️ Arama cevapsız kaldı ({outcome}). "
+                            "5 dakika sonra tekrar denenecek."
+                        )
+                    continue
                 self.repo.update_call(
                     call["id"], status="no_answer", outcome=outcome, completed_at=_now()
                 )

@@ -21,6 +21,7 @@ def settings(tmp_path):
         business_timezone="UTC",
         raw_transcript_retention_days=90,
         api_token="",
+        sandbox_action_webhook_url="",
     )
 
 

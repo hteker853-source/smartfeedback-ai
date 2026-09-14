@@ -291,6 +291,20 @@ class Pipeline:
             return {"status": "failed"}
 
         if outcome in ("no_answer", "voicemail"):
+            if (call.get("retry_count") or 0) == 0:
+                retry_at = (
+                    datetime.now(timezone.utc) + timedelta(minutes=5)
+                ).isoformat(timespec="seconds")
+                self.repo.update_call(
+                    call_id, status="retry_scheduled", outcome=outcome,
+                    retry_count=1, retry_at=retry_at,
+                )
+                if notify_status:
+                    await notify.send_admin(
+                        f"ℹ️ Arama cevapsız kaldı ({outcome}). "
+                        "5 dakika sonra tekrar denenecek."
+                    )
+                return {"status": "retry_scheduled"}
             self.repo.update_call(
                 call_id, status="no_answer", outcome=outcome, completed_at=_now()
             )
@@ -310,6 +324,64 @@ class Pipeline:
             return {"status": "completed"}
 
         return {"status": outcome or "in_progress"}
+
+    async def redial_due_calls(self) -> int:
+        """Re-place ONE retry CALL-E attempt for calls whose first attempt
+        was no_answer/voicemail and whose 5-minute retry window has arrived.
+
+        Reuses the SAME `calls` row (no second row is created), so the
+        one-call-per-order constraint is untouched. At most one retry per
+        call: `retry_count` is already 1 by the time a call reaches here
+        (set when the retry was scheduled), so a second no_answer/voicemail
+        after this redial finalizes the call as terminal instead of looping.
+        """
+        with _connect(self.repo.db_path) as conn:
+            rows = conn.execute(
+                """SELECT * FROM calls WHERE status = 'retry_scheduled'
+                   AND retry_at IS NOT NULL AND retry_at <= ?""",
+                (_now(),),
+            ).fetchall()
+            due = [dict(r) for r in rows]
+
+        redialed = 0
+        for call in due:
+            order = self.repo.get_order(call["order_id"])
+            customer = self._load_customer(call["customer_id"])
+            if order is None or customer is None or customer["do_not_call"]:
+                self.repo.update_call(
+                    call["id"], status="failed", failure_code="retry_skipped",
+                    completed_at=_now(),
+                )
+                continue
+            if not self.calle.enabled:
+                self.repo.update_call(
+                    call["id"], status="failed", failure_code="calle_not_configured",
+                    completed_at=_now(),
+                )
+                continue
+            try:
+                result = self.calle.place_call(
+                    phone=customer["phone"],
+                    business_name=self.business_name,
+                    locale=order.get("locale", "tr"),
+                    order_id=order["id"],
+                    correlation_id=order.get("correlation_id", ""),
+                    business_id=self.business_id,
+                    environment=self.settings.environment,
+                    context=self._build_call_context(customer),
+                    preferred_language=customer.get("preferred_language"),
+                )
+                self.repo.update_call(
+                    call["id"], status="calling", calle_call_id=str(result.get("id")),
+                    started_at=_now(), retry_at=None,
+                )
+                redialed += 1
+            except Exception as exc:  # noqa: BLE001
+                self.repo.update_call(
+                    call["id"], status="failed", failure_code=str(exc)[:200],
+                    completed_at=_now(),
+                )
+        return redialed
 
     # -- mock / simulated call -------------------------------------------
     async def simulate_call(

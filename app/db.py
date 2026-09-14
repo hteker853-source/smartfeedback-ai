@@ -299,6 +299,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if "reasoning_summary" not in trace_cols:
         conn.execute("ALTER TABLE agent_traces ADD COLUMN reasoning_summary TEXT")
 
+    call_cols = {row["name"] for row in conn.execute("PRAGMA table_info(calls)")}
+    if "retry_count" not in call_cols:
+        conn.execute("ALTER TABLE calls ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0")
+    if "retry_at" not in call_cols:
+        conn.execute("ALTER TABLE calls ADD COLUMN retry_at TEXT")
+
 
 def rows_to_dicts(rows: Iterable[sqlite3.Row]) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]

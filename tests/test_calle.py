@@ -93,8 +93,11 @@ def test_classify_outcome_taxonomy():
 
 
 def test_no_answer_not_processed_as_transcript(repo, settings, monkeypatch):
-    """A call with no answer must be marked no_answer, never processed as a
-    completed conversation (no feedback, no analysis)."""
+    """A call with no answer must never be processed as a completed
+    conversation (no feedback, no analysis) on either attempt: the first
+    no_answer schedules the single retry (DÜZELTME 2), and a second
+    no_answer finalizes as terminal `no_answer` — neither ever creates a
+    feedback row."""
     from app import notify
     from app.pipeline import Pipeline
 
@@ -104,6 +107,9 @@ def test_no_answer_not_processed_as_transcript(repo, settings, monkeypatch):
         def fetch_call(self, calle_call_id):
             return {"status": "completed", "recipients": [{"status": "no_answer"}]}
 
+        def place_call(self, **kwargs):
+            return {"id": "cal_x_retry"}
+
     p = Pipeline(repo, settings)
     result = p.handle_order("+905445974126", status="sent")
     order = result["order"]
@@ -112,8 +118,19 @@ def test_no_answer_not_processed_as_transcript(repo, settings, monkeypatch):
     )
     p.calle = _NoAnswerCalle()
     notify.set_sender(None)
+
     status = _run(p.poll_and_finalize(call["id"], notify_status=False))
-    assert status["status"] == "no_answer"
+    assert status["status"] == "retry_scheduled"
+    assert repo.get_call(call["id"])["status"] == "retry_scheduled"
+    assert len(repo.list_feedbacks(p.business_id)) == 0
+
+    from datetime import datetime, timedelta, timezone
+    past = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(timespec="seconds")
+    repo.update_call(call["id"], retry_at=past)
+    _run(p.redial_due_calls())
+
+    status2 = _run(p.poll_and_finalize(call["id"], notify_status=False))
+    assert status2["status"] == "no_answer"
     assert repo.get_call(call["id"])["status"] == "no_answer"
     assert len(repo.list_feedbacks(p.business_id)) == 0
 

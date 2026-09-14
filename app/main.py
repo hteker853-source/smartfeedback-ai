@@ -400,3 +400,25 @@ async def demo(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     if processed is None:
         return {"status": "no_content"}
     return processed
+
+
+@app.post("/mock/downstream-action")
+async def mock_downstream_action(payload: dict[str, Any]) -> dict[str, Any]:
+    """Self-hosted sandbox receiver for `app/actions.py::execute_approved_action`.
+
+    Stands in for an external downstream system (CRM, refund processor,
+    etc.) so `SANDBOX_ACTION_WEBHOOK_URL` can point somewhere real without
+    depending on a third-party service. Logs the received action and
+    returns a fake-but-realistic acknowledgement; performs no real side
+    effect of its own.
+    """
+    import uuid
+
+    logger.info(
+        "mock downstream action received: action_id=%s action_type=%s decision=%s",
+        payload.get("action_id"), payload.get("action_type"), payload.get("decision"),
+    )
+    return {
+        "status": "processed",
+        "reference_id": f"MOCK-{uuid.uuid4().hex[:8]}",
+    }
