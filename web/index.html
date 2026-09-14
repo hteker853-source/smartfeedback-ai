@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SmartFeedback AI</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --fg:#e2e8f0; --muted:#94a3b8;
+          --accent:#38bdf8; --red:#f87171; --green:#4ade80; --amber:#fbbf24; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+  header { padding:20px 24px; border-bottom:1px solid #334155; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; }
+  header h1 { margin:0; font-size:20px; }
+  .badge { font-size:12px; padding:4px 10px; border-radius:999px; background:#334155; color:var(--muted); }
+  .badge.on { background:#14532d; color:var(--green); }
+  main { padding:24px; display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:16px; }
+  .card { background:var(--card); border:1px solid #334155; border-radius:12px; padding:16px; }
+  .card.wide { grid-column: 1 / -1; }
+  .card h2 { margin:0 0 12px; font-size:15px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  .stat { font-size:28px; font-weight:700; }
+  ul { list-style:none; margin:0; padding:0; }
+  li { padding:8px 0; border-bottom:1px solid #263244; font-size:14px; }
+  li:last-child { border-bottom:none; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:6px; font-size:12px; }
+  .pill.critical { background:#7f1d1d; color:var(--red); }
+  .pill.high { background:#7c2d12; color:var(--amber); }
+  .pill.medium { background:#713f12; color:var(--amber); }
+  .pill.low { background:#1e293b; color:var(--muted); }
+  .pill.positive { background:#14532d; color:var(--green); }
+  .pill.neutral { background:#334155; color:var(--muted); }
+  .pill.negative { background:#7f1d1d; color:var(--red); }
+  .pill.alarm { background:#7f1d1d; color:var(--red); }
+  .pill.summary { background:#713f12; color:var(--amber); }
+  .pill.none { background:#1e293b; color:var(--muted); }
+  .pill.rising { background:#7c2d12; color:var(--amber); }
+  .pill.improving { background:#14532d; color:var(--green); }
+  .pill.stable { background:#1e293b; color:var(--muted); }
+  .muted { color:var(--muted); font-size:13px; }
+  .trace li { display:flex; gap:10px; align-items:baseline; }
+  .trace .step { color:var(--accent); font-weight:600; min-width:92px; }
+  .transcript { background:#0f172a; border:1px solid #263244; border-radius:8px; padding:10px; font-size:13px; white-space:pre-wrap; }
+</style>
+</head>
+<body>
+<header>
+  <h1>SmartFeedback AI <span class="muted">— Müşteri Deneyimi Zekâsı</span></h1>
+  <span id="health" class="badge">...</span>
+</header>
+<main>
+  <div class="card">
+    <h2>Genel Memnuniyet</h2>
+    <div id="satisfaction" class="stat">—</div>
+    <div id="feedbackCount" class="muted"></div>
+  </div>
+  <div class="card wide">
+    <h2>Son Analiz — Transkript → Ajan İzi → Karar</h2>
+    <div id="decision" class="muted" style="margin-bottom:10px;"></div>
+    <div id="transcript" class="transcript"></div>
+    <ul id="trace" class="trace" style="margin-top:10px;"></ul>
+  </div>
+  <div class="card wide">
+    <h2>Karar Zinciri — Neden?</h2>
+    <div id="decisionCard" class="muted">Henüz analiz yok.</div>
+  </div>
+  <div class="card">
+    <h2>Sorun Trendi</h2>
+    <ul id="trends"></ul>
+  </div>
+  <div class="card">
+    <h2>Farklı Dil Konuşan Müşteri Memnuniyeti</h2>
+    <div id="foreignTrend" class="muted">—</div>
+  </div>
+  <div class="card">
+    <h2>Tekrarlayan Sorunlar</h2>
+    <ul id="problems"></ul>
+  </div>
+  <div class="card">
+    <h2>Vakalar (Operasyonel)</h2>
+    <ul id="cases"></ul>
+  </div>
+  <div class="card">
+    <h2>İçgörüler</h2>
+    <ul id="insights"></ul>
+  </div>
+  <div class="card">
+    <h2>Son Geri Bildirimler</h2>
+    <ul id="feedbacks"></ul>
+  </div>
+</main>
+<script>
+async function load() {
+  const healthEl = document.getElementById('health');
+  let health, summary;
+  try {
+    [health, summary] = await Promise.all([
+      fetch('/health').then(r => r.json()),
+      fetch('/api/summary').then(r => r.json()),
+    ]);
+  } catch (e) {
+    healthEl.textContent = 'BACKEND UNAVAILABLE';
+    healthEl.classList.remove('on');
+    return;
+  }
+  const h = healthEl;
+  h.textContent = health.status === 'ok' ? 'ONLINE' : (health.status === 'degraded' ? 'DEGRADED' : 'DOWN');
+  h.classList.toggle('on', health.status === 'ok');
+
+  const fbs = summary.feedbacks || [];
+  const scores = fbs.map(f => f.satisfaction).filter(x => x != null);
+  document.getElementById('satisfaction').textContent =
+    scores.length ? (scores.reduce((a,b)=>a+b,0)/scores.length).toFixed(1) + ' / 5' : '—';
+  document.getElementById('feedbackCount').textContent = fbs.length + ' geri bildirim';
+
+  // Last analysis: transcript + decision + tool trace
+  const lf = summary.last_feedback;
+  const dec = document.getElementById('decision');
+  if (lf) {
+    const dmap = { alarm: '🚨 ALARM', özet: '📋 ÖZET', dokunma: '✅ DOKUNMA' };
+    dec.innerHTML = `Karar: <span class="pill ${lf.decision}">${dmap[lf.decision] || lf.decision}</span>`
+      + ` <span class="muted">· ${lf.sentiment} · ${lf.satisfaction}/5 · ${lf.priority}</span>`;
+    document.getElementById('transcript').textContent = lf.transcript || '(transcript yok)';
+  } else {
+    dec.textContent = 'Henüz analiz yok.';
+    document.getElementById('transcript').textContent = '';
+  }
+  const trace = document.getElementById('trace');
+  trace.innerHTML = (summary.tool_trace || []).map(t => {
+    // GÖREV D: "dedi ki" narration line, straight from the agent's own LLM
+    // output (reasoning_summary) when available — never a fabricated string.
+    const reasoningLine = t.reasoning
+      ? `<div class="muted" style="margin-left:102px; font-style:italic;">"${escapeHtml(t.reasoning)}"</div>`
+      : '';
+    return `<li style="flex-direction:column; align-items:stretch;">`
+      + `<div style="display:flex; gap:10px; align-items:baseline;">`
+      + `<span class="step">${escapeHtml(t.step)}</span><span>${escapeHtml(t.label)}</span>`
+      + `<span class="muted">→ ${escapeHtml(t.out)}</span></div>${reasoningLine}</li>`;
+  }).join('');
+
+  renderDecisionCard(summary.decision_card);
+
+  // Problem trends: count + direction
+  const trends = document.getElementById('trends');
+  const dirMap = { rising: 'yükseliyor', improving: 'iyileşiyor', stable: 'sabit' };
+  trends.innerHTML = (summary.problem_trends || []).slice(0,12).map(t =>
+    `<li>${escapeHtml(t.name)} <span class="pill ${t.direction}">${t.count}× ${dirMap[t.direction]||t.direction}</span></li>`
+  ).join('') || '<li class="muted">Henüz sorun yok.</li>';
+
+  const ft = summary.foreign_customer_trend;
+  const foreignTrendEl = document.getElementById('foreignTrend');
+  if (ft && ft.trend !== 'insufficient_data') {
+    const ftDirMap = { improving: 'iyileşiyor', worsening: 'kötüleşiyor', stable: 'sabit' };
+    const sign = ft.percent_change > 0 ? '+' : '';
+    foreignTrendEl.innerHTML =
+      `<span class="pill ${ft.trend === 'worsening' ? 'negative' : ft.trend === 'improving' ? 'positive' : 'neutral'}">` +
+      `${ftDirMap[ft.trend] || ft.trend} (${sign}${ft.percent_change}%)</span>` +
+      `<div class="muted" style="margin-top:6px;">Son ${ft.window_days} gün: ${ft.recent_n} geri bildirim, ` +
+      `ort. ${ft.recent_avg_satisfaction != null ? ft.recent_avg_satisfaction.toFixed(1) : '—'}/5</div>`;
+  } else {
+    foreignTrendEl.innerHTML = '<span class="muted">Yetersiz veri (en az 3 geri bildirim gerekli)</span>';
+  }
+
+  const problems = document.getElementById('problems');
+  problems.innerHTML = (summary.problems || []).slice(0,12).map(p =>
+    `<li>${escapeHtml(p.name)} <span class="pill ${p.status || 'low'}">${p.count}× ${p.status||''}</span></li>`
+  ).join('') || '<li class="muted">Henüz sorun yok.</li>';
+
+  const cases = document.getElementById('cases');
+  cases.innerHTML = (summary.cases || []).slice(0,12).map(c => {
+    const impact = (c.impact_score||0) >= 0.7 ? 'YÜKSEK' : (c.impact_score||0) >= 0.45 ? 'ORTA' : 'DÜŞÜK';
+    return `<li>${escapeHtml(c.title)} <span class="pill ${c.severity || 'low'}">${c.status}</span>
+      <div class="muted">${c.occurrence_count}× görüldü · ${c.affected_customer_count||'?'} müşteri · güven ${(c.confidence*100).toFixed(0)}% · etki ${impact} · trend ${c.trend_direction||'—'} · karar ${c.last_decision_action||'—'}</div></li>`;
+  }).join('') || '<li class="muted">Henüz vaka yok.</li>';
+
+  const insights = document.getElementById('insights');
+  insights.innerHTML = (summary.insights || []).slice(0,12).map(i =>
+    `<li>${escapeHtml(i.title)} <span class="pill ${i.priority||'low'}">${i.insight_type}</span><div class="muted">${escapeHtml(i.description||'')}</div></li>`
+  ).join('') || '<li class="muted">Henüz içgörü yok.</li>';
+
+  const feedbacks = document.getElementById('feedbacks');
+  feedbacks.innerHTML = fbs.slice(0,12).map(f =>
+    `<li><span class="pill ${f.sentiment}">${f.sentiment}</span> ${f.satisfaction||'?'}/5
+      <div class="muted">${escapeHtml((f.raw_json ? JSON.parse(f.raw_json).summary : '') || f.transcript || '').slice(0,120)}</div></li>`
+  ).join('') || '<li class="muted">Henüz geri bildirim yok.</li>';
+}
+function escapeHtml(s){return (s||'').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+function renderDecisionCard(card) {
+  const el = document.getElementById('decisionCard');
+  if (!card) { el.textContent = 'Henüz analiz yok.'; return; }
+
+  const ver = (card.verification || []).map(v => {
+    const cls = v.status === 'verified' ? 'positive' : (v.status === 'contradicted' ? 'negative' : 'neutral');
+    const label = v.status === 'verified' ? 'SUPPORTED' : (v.status === 'contradicted' ? 'CONTRADICTED' : 'INSUFFICIENT');
+    return `<span class="pill ${cls}">${label}</span>`;
+  }).join(' ') || '<span class="pill neutral">—</span>';
+
+  const conf = card.confidence ? Math.round((card.confidence.total||0)*100) : '—';
+  const case_ = card.case || {};
+  const occ = case_.occurrence_count || 0;
+  const cust = case_.affected_customer_count || 0;
+  const trend = case_.trend_direction || card.trend_direction || '—';
+  const impact = card.impact && card.impact.label ? card.impact.label.toUpperCase() : '—';
+  const impactCls = impact === 'HIGH' ? 'negative' : (impact === 'MEDIUM' ? 'medium' : 'neutral');
+  const action = card.action || '—';
+  const dissent = (card.dissent || []).length;
+
+  const rows = [
+    ['Müşteri', escapeHtml((card.customer_statement||'').slice(0,160))],
+    ['Kanıt (span)', escapeHtml((card.evidence_span||'').slice(0,200) || '—')],
+    ['Doğrulama', ver],
+    ['Güven', `${conf}%`],
+    ['Tekrar', `${occ} görüldü / ${cust} müşteri`],
+    ['Trend', escapeHtml(trend.toUpperCase())],
+    ['Etki', `<span class="pill ${impactCls}">${impact}</span>`],
+    ['Politika', `<span class="pill ${action==='alert'?'alarm':(action==='record'?'summary':'neutral')}">${escapeHtml(action.toUpperCase())}</span>`],
+    ['Anlaşmazlık', dissent > 0 ? `${dissent} kayıt` : 'yok'],
+  ];
+
+  el.innerHTML = `<ul class="trace">` + rows.map(r =>
+    `<li><span class="step">${r[0]}</span><span>${r[1]}</span></li>`
+  ).join('') + `</ul>`;
+}
+load();
+setInterval(load, 15000);
+</script>
+</body>
+</html>
