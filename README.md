@@ -5,7 +5,7 @@
 - **Amazon Bedrock** (`us.amazon.nova-lite-v1:0` via the Converse API) — the LLM reasoning layer the agent system is designed around.
 - **Strands Agents SDK** — AWS's own open-source multi-agent orchestration framework (`strands-agents`, published by AWS); it drives all four agents (Feedback / Investigation / Trend / Supervisor).
 - **Amazon Bedrock AgentCore** — not integrated in this codebase. Strands' own agent runtime is used directly; there is no AgentCore session/runtime layer.
-- Bedrock is the primary provider by design (`LLM_PROVIDER=bedrock`) behind the same Strands model-provider socket, and AWS credentials are already configured. This demo currently runs on **Gemini** instead, because Bedrock access/quota approval is still pending on the AWS account used for the demo; DeepSeek is the coded runtime fallback if the configured primary provider's model fails to build. Switching back to Bedrock once quota clears is a one-line `LLM_PROVIDER` change, not a code change.
+- Bedrock is the primary provider by design (`LLM_PROVIDER=bedrock`) behind the same Strands model-provider socket, and AWS credentials are already configured. This demo currently runs on **DeepSeek** instead — Bedrock access/quota approval is still pending on the AWS account used for the demo, and no Gemini key is configured either, so the pipeline's runtime fallback (DeepSeek) is what actually serves requests right now. Switching back to Bedrock once quota clears is a one-line `LLM_PROVIDER` change, not a code change.
 - This demo instance is hosted on Ubuntu 24.04 LTS on a Hetzner vServer, not on AWS infrastructure.
 
 # SmartFeedback AI
