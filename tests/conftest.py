@@ -12,6 +12,7 @@ def settings(tmp_path):
         aws_access_key_id="",
         aws_secret_access_key="",
         deepseek_api_key="",
+        gemini_api_key="",
         calle_api_key="",
         telegram_bot_token="",
         telegram_admin_chat_id="",

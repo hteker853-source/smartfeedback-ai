@@ -625,7 +625,14 @@ class Pipeline:
             claims, verifications, refs
         )
 
-        decision, action, dissent = policy.evaluate(
+        # Routed through app.agents.policy_hook so this decision point is
+        # observable via genuine Strands BeforeToolCallEvent/
+        # AfterToolCallEvent hooks (logging only). Same call, same
+        # arguments, same return value as policy.evaluate() itself — see
+        # that module's docstring for why it's never LLM-reachable.
+        from .agents.policy_hook import run_policy_decision
+
+        decision, action, dissent = run_policy_decision(
             feedback,
             claims,
             verifications,
