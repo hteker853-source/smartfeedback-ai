@@ -265,7 +265,10 @@ Send a phone number to create an order, then choose **Order created** or
 
 ## Operational guarantees
 
-- One feedback call per order (unique constraint); no retry on no-answer.
+- One feedback call per order (unique constraint). A no_answer/voicemail
+  outcome gets exactly one automatic redial 5 minutes later, reusing the
+  same call row; a second no_answer/voicemail finalizes the call — no
+  unbounded retry loop.
 - A customer who says "don't call me" is marked `do_not_call` and never called again.
 - Idempotent processing: duplicate webhooks, duplicate call results and concurrent
   workers cannot create duplicate feedback or duplicate calls.
