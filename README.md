@@ -1,6 +1,31 @@
+**The only agent that answers the phone, cross-examines the evidence, and safely executes the policy.**
+
 # SmartFeedback AI
 
 > Turn customer **voice** into **actionable business intelligence**.
+
+## At a glance
+
+| Criterion | Concrete evidence |
+| --- | --- |
+| Technical | Claims are verified against the exact transcript span before a deterministic policy gate (`app/policy.py`) — never the LLM — decides `no_action` / `record` / `alert` / `human_approval` / `blocked`. |
+| Design | The Supervisor agent only reconciles the three specialists' findings into a proposed `Decision`; it never calls a tool or sends anything itself, keeping the whole decision path auditable end-to-end. |
+| Impact | The business-impact score (`app/impact.py`) is deterministic (recurrence × severity × affected customers × trend × recency), so an owner is alerted by real operational cost, not sentiment noise. |
+| Creativity | Adaptive contextual calling closes the loop: a customer's previously *verified* issue becomes one natural follow-up question on the next call, built only from canonical problem names — never raw transcripts or PII. |
+| Presentation | A 30-day usage montage (unreachable → retry, apology + discount callback, positive feedback, trend alert, urgent case) demonstrates the full range of real scenarios in under a minute of demo video. |
+
+```mermaid
+flowchart LR
+    A[Order completed] --> B[CALL-E phone call]
+    B --> C{4-agent analysis}
+    C --> D[Feedback]
+    C --> E[Investigation]
+    C --> F[Trend]
+    D --> G[Supervisor decision]
+    E --> G
+    F --> G
+    G --> H[Telegram notification]
+```
 
 SmartFeedback AI calls customers after a completed order/service, turns the
 conversation into text, analyzes it with a **Strands agent** system, and
